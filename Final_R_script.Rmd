@@ -1,0 +1,1288 @@
+---
+title: "Final Project : Forecasting Turkey's Inflation "
+author: "ARZU ISIK TOPBAS"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: yes
+  html_document:
+    toc: yes
+    theme: sandstone
+    highlight: kate
+    toc_float: yes
+---
+\pagebreak
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Load necessary libraries
+library(dplyr)          # Data wrangling
+library(lubridate)      # Date functions
+library(xts)            # Time series object
+library(padr)           # Padding time series
+library(forecast)       # Time series forecasting
+library(tseries)        # Time series analysis
+library(ggplot2)        # Data visualization
+library(readxl)         # Excel file reading
+library(anytime)        # Date-time conversion
+library(GGally)         # Extended ggplot2 functions
+library(MASS)           # Modern Applied Statistics with S
+library(vars)
+library(BayesFactor)
+library(coda)
+library(Matrix)
+library(ggside)
+library(RColorBrewer)
+library(prophet)
+library(car)
+
+mytheme <- theme(
+  plot.title = element_text(hjust = 0.5 ,size = 18, 
+                            face = "bold",color = 'darkslategray'),
+  legend.title = element_text(colour = 'darkslategray'),
+  legend.text = element_text(colour = 'darkslategray'),
+  axis.title = element_text(size = (12), colour = 'darkslategray'),
+  axis.text = element_text( colour = 'darkslategray', size = (12))
+)
+
+```
+
+
+# Time Series Forecasting for Inflation Data: A Comprehensive Analysis - Turkey {.tabset}
+
+
+## Data
+
+```{r}
+# Data 
+# inflation : https://data.oecd.org/price/inflation-cpi.htm
+# gold_data :  https://data.worldbank.org/
+# oil : https://data.worldbank.org/
+# unemployment : https://www.tuik.gov.tr/Home/Index
+# exchange rate : https://www.turkiye.gov.tr/doviz-kurlari - 
+# interest rate : https://fred.stlouisfed.org/series/INTDSRTRM193N
+```
+
+**Comment:** In this project, a comprehensive dataset has been compiled, drawing from various reputable sources to analyze key economic indicators. The inflation data, retrieved from the OECD, provides insights into the Consumer Price Index (CPI), serving as a crucial measure of general price level changes over time. The gold and oil datasets, sourced from the World Bank, shed light on the trends and fluctuations in the prices of these essential commodities, offering valuable information for understanding economic stability and resource dependencies. The unemployment statistics, obtained from the Turkish Statistical Institute, contribute essential labor market insights, while the exchange rate data from the Turkish government's official portal and the interest rate data from the St. Louis Fed's FRED platform provide a comprehensive view of monetary policy and its impact on the economy. 
+
+```{r}
+# Load data from Excel file
+data <- read_excel("inflation_data_tur.xlsx")
+
+# Convert the 'date' column to a Date type using anytime
+data$date <- anytime(data$date)
+
+# Set the date for splitting the data
+split_date <- as.Date("2023-06-01")  # Change the date accordingly
+
+# Create training and testing sets
+train_data <- subset(data, date < split_date)
+test_data <- subset(data, date >= split_date)
+
+# Print the dimensions of the training and testing sets
+cat("Dimensions of Training Data:", dim(train_data), "\n")
+cat("Dimensions of Testing Data:", dim(test_data), "\n")
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+ggpairs(data)
+```
+
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+# Time series plot of inflation with minimal theme and saved as an image
+library(ggplot2)
+
+plot <- ggplot(data, aes(x = date, y = inflation)) +
+  geom_line() +
+  labs(title = "Inflation (CPI) Over Time", x = "Date", y = "CPI Growth rate ") +
+  theme_minimal()
+
+ggsave("image/inflation_plot.png", plot, width = 8, height = 4, units = "in")
+plot
+```
+
+**Comment:** The time series plot shows an upward trend in the CPI over time, indicating that inflation has generally increased but the dramatic increases after 2021. 
+
+The Turkey CPI graph shows that Turkey's inflation rate has been steadily increasing since 2015, with a sharp rise in 2022 and 2023. As of November 2023, Turkey's annual inflation rate is 61.98%, the highest it has been in decades.
+
+There are a number of factors that have contributed to Turkey's high inflation rate, including:
+
+The COVID-19 pandemic, which disrupted supply chains and drove up prices.
+The war in Ukraine, which has further disrupted supply chains and caused energy prices to soar.
+The Turkish government's unorthodox economic policies, such as cutting interest rates despite high inflation.
+The high inflation rate has had a significant impact on the Turkish economy, eroding people's purchasing power and making it difficult for businesses to operate. It has also led to a decline in the value of the Turkish lira.
+
+The Turkish government has taken some steps to address the inflation problem, such as raising interest rates and providing subsidies for certain goods. However, it is unclear whether these measures will be enough to bring inflation under control.
+
+Overall, the Turkey CPI graph shows a worrying trend of rising inflation. The Turkish government needs to take decisive action to address this problem in order to protect the Turkish economy and its people.
+
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+# Plot Autocorrelation Function (ACF)
+data_ts <- ts(data$inflation, frequency = 12)
+acf <- acf(data_ts)
+pacf <- pacf(data_ts)
+
+# Set up a PNG graphics device
+png("image/acf_pacf_plots.png", width = 800, height = 300)
+
+par(mfrow = c(1, 2))
+
+# Plot ACF with title
+plot1 <- plot(acf, main = "ACF of CPI")
+
+# Plot PACF with title
+plot2 <- plot(pacf, main = "PACF of CPI")
+
+plot1 + plot2
+
+# Close the graphics device and save the image
+dev.off()
+```
+
+**Comment:** The analysis of the Consumer Price Index (CPI) reveals a strong positive autocorrelation at lag 1, indicating high persistence in inflation. The series is non-stationary, requiring differencing for stationarity. This information is vital for developing forecasting models, such as the Autoregressive Integrated Moving Average (ARIMA) model.
+
+Additional insights highlight the CPI's positive autocorrelation at lags 1 through 12, indicating a highly autocorrelated series with decreasing correlation over time. The Autocorrelation Function (ACF) is valuable for identifying seasonal patterns and outliers.
+
+Similarly, the Partial Autocorrelation Function (PACF) for Turkey's inflation shows a significant positive correlation at lag 1, suggesting high persistence and non-stationarity. This information is crucial for forecasting models like ARIMA.
+
+Observations on the PACF of Turkey's inflation note similarities with other macroeconomic variables, indicating common driving factors. The PACF can identify shocks to the inflation rate and assess the effectiveness of monetary policy, with a high correlation suggesting successful control.
+
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+library(ggplot2)
+library(patchwork)
+
+plot1 <- ggplot(data, aes(x = date, y = gold_data)) +
+  geom_line() +
+  labs(title = "Gold", x = "Date", y = " Gold ") +
+  theme_minimal()
+
+plot2 <- ggplot(data, aes(x = date, y = oil)) +
+  geom_line() +
+  labs(title = "Oil", x = "Date", y = " Oil") +
+  theme_minimal()
+
+plot3 <- ggplot(data, aes(x = date, y = unemployment)) +
+  geom_line() +
+  labs(title = "Unemployment Rate", x = "Date", y = " Unemployment") +
+  theme_minimal()
+
+plot4 <- ggplot(data, aes(x = date, y = usd)) +
+  geom_line() +
+  labs(title = "USD", x = "Date", y = " USD") +
+  theme_minimal()
+
+plot5 <- ggplot(data, aes(x = date, y = int_rate)) +
+  geom_line() +
+  labs(title = "Interest Rate", x = "Date", y = "Interest Rate") +
+  theme_minimal()
+
+# Combine plots using patchwork
+combined_plots <- plot1 + plot2 + plot3 + plot4 + plot5
+combined_plots
+#ggsave("image/combined_plots.png", combined_plots)
+
+```
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+# ACF and PACF plots for independent variables
+data_gold <- ts(data$gold_data, frequency = 12)
+data_oil <- ts(data$oil, frequency = 12)
+data_unemployment <- ts(data$unemployment, frequency = 12)
+data_usd <- ts(data$usd, frequency = 12)
+data_int_rate <- ts(data$int_rate, frequency = 12)
+
+# Function to create ACF and PACF plots
+create_acf_pacf_plots <- function(data, main_title) {
+  acf_result <- acf(data)
+  pacf_result <- pacf(data)
+  
+  png(paste0("image/other/acf_pacf_plots_", tolower(gsub(" ", "_", main_title)), ".png"), width = 700, height = 600)
+
+  par(mfrow = c(2, 1))
+
+  plot1 <- plot(acf_result, main = paste("ACF of", main_title))
+
+  plot2 <- plot(pacf_result, main = paste("PACF of", main_title))
+
+  plot1 + plot2
+
+  dev.off()
+}
+
+# Create ACF and PACF plots for each variable
+create_acf_pacf_plots(data_gold, "Gold")
+create_acf_pacf_plots(data_oil, "Oil")
+create_acf_pacf_plots(data_unemployment, "Unemployment")
+create_acf_pacf_plots(data_usd, "USD Exchange Rate")
+create_acf_pacf_plots(data_int_rate, "Interest Rate")
+
+```
+
+```{r}
+# Check for stationarity using ADF tests
+adf_test <- ur.df(data$inflation, lags = 6, selectlags = "AIC", type = "drift")
+summary(adf_test)
+```
+
+```{r}
+# Check for stationarity using DF-GLS tests
+dfgls_test <- ur.ers(data$inflation, lag.max = 6, model = "constant")
+summary(dfgls_test)
+```
+
+**Comment:** Both the ADF test and the DF-GLS test indicate that the Turkish inflation data is non-stationary, as the p-values of the test statistics are greater than the significance level of 0.05. This means that the data has a trend and/or seasonal component, and that forecasting future values of inflation based on the current values will not be accurate.
+
+
+\pagebreak
+
+## Prophet
+
+```{r,fig.width=12,fig.height=6}
+
+train_data_prophet <- data.frame(ds = train_data$date, 
+                                 y = train_data$inflation)
+
+# Create a dummy variable 'holiday' from 
+# March 15th of 2020 to March 1st of 2022
+covid <- data.frame(
+  holiday = 'covid',
+  ds = seq(as.Date('2020-3-15'), to=as.Date('2022-3-1'), by='days')
+)
+
+# Extract month and year
+train_data_prophet$month <- months(train_data_prophet$ds)
+train_data_prophet$year <- as.factor(year(train_data_prophet$ds))
+
+# Create a custom monthly seasonality
+prophet_model <- prophet(train_data_prophet, 
+                         holidays = covid, 
+                         yearly.seasonality = TRUE, 
+                         weekly.seasonality = FALSE, 
+                         daily.seasonality = FALSE)
+
+# Make future data for prediction
+future <- make_future_dataframe(prophet_model, 
+                                periods = 4, freq = 'months')
+
+# Predict
+forecast <- predict(prophet_model, future)
+
+# Extract predicted values from the forecast
+predicted_values <- forecast$yhat[1:length(test_data$inflation)]
+
+# Calculate RMSE
+rmse_prophet <- sqrt(mean((test_data$inflation - predicted_values)^2))
+
+# Calculate MAE
+mae_prophet <- mean(abs(test_data$inflation - predicted_values))
+
+# Print the results
+cat("RMSE for Prophet:", rmse_prophet, "\n")
+cat("MAE for Prophet:", mae_prophet, "\n")
+```
+
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+library(gridExtra)
+
+plot_components_list <- prophet_plot_components(prophet_model, forecast)
+
+# Arrange all plot components in a single image
+combined_plot <- grid.arrange(grobs = plot_components_list, ncol = 1)
+
+# Save the combined plot as an image
+ggsave("image/prophet_combined_components_plot.png", 
+       combined_plot, width = 12, height = 7, units = "in")
+```
+
+```{r}
+data$date <- as.POSIXct(data$date)
+data <- data[order(data$date),]
+
+# Compute differences for each variable
+data_diff <- data.frame(
+  date = data$date,
+  inflation= c(NA, diff(data$inflation)),
+  gold_data= c(NA, diff(data$gold_data)),
+  oil = c(NA, diff(data$oil)),
+  unemployment = c(NA, diff(data$unemployment)),
+  usd = c(NA, diff(data$usd)),
+  int_rate= c(NA, diff(data$int_rate))
+)
+
+# Drop rows with NA values
+data_diff <- na.omit(data_diff)
+
+# Convert the 'date' column to a Date type using anytime
+data_diff$date <- anytime(data_diff$date)
+
+# Set the date for splitting the data
+split_date <- as.Date("2023-06-01")  # Change the date accordingly
+
+# Create training and testing sets
+data <- data_diff
+train_data <- subset(data_diff, date < split_date)
+test_data <- subset(data_diff, date >= split_date)
+
+# Print the dimensions of the training and testing sets
+cat("Dimensions of Training Data:", dim(train_data), "\n")
+cat("Dimensions of Testing Data:", dim(test_data), "\n")
+
+
+```
+
+```{r}
+# Check for stationarity again using the ADF test
+adf_test <- ur.df(data$inflation, lags = 6, selectlags = "AIC", type = "drift")
+summary(adf_test)
+```
+
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+# Calculate autocorrelation function for differenced data
+acf_diff <- acf(data$inflation)
+
+# Calculate partial autocorrelation function for differenced data
+pacf_diff <- pacf(data$inflation)
+
+# Set up a PNG graphics device
+png("image/acf_pacf_diff_plots.png", width = 800, height = 300)
+
+# Set up a 1x2 layout for side-by-side plots
+par(mfrow=c(1,2))
+
+# Plot ACF with title
+plot(acf_diff, main="ACF of First Order Difference Series")
+
+# Plot PACF with title
+plot(pacf_diff, main="PACF of First Order Difference Series")
+
+# Reset the layout to default (1x1)
+par(mfrow=c(1,2))
+
+# Close the graphics device and save the image
+dev.off()
+
+```
+
+Comment :  the ADF test results provide strong evidence that the first difference of the inflation data is stationary.
+
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+library(ggplot2)
+
+old.par <- par(mfrow=c(2,3))
+
+plot1 <- ggplot(data, aes(x = date, y = gold_data)) +
+  geom_line() +
+  labs(title = "Gold", x = "Date", y = " Gold ") +
+  theme_minimal()
+
+plot2 <- ggplot(data, aes(x = date, y = oil)) +
+  geom_line() +
+  labs(title = "Oil", x = "Date", y = " Oil") +
+  theme_minimal()
+
+plot3 <- ggplot(data, aes(x = date, y = unemployment)) +
+  geom_line() +
+  labs(title = "Unemployment Rate", x = "Date", y = " Unemployment") +
+  theme_minimal()
+
+plot4 <- ggplot(data, aes(x = date, y = usd)) +
+  geom_line() +
+  labs(title = "USD", x = "Date", y = " USD") +
+  theme_minimal()
+
+plot5 <- ggplot(data, aes(x = date, y = int_rate)) +
+  geom_line() +
+  labs(title = "Interest Rate", x = "Date", y = "Interest Rate") +
+  theme_minimal()
+
+combined_plots <- plot1 + plot2 + plot3 + plot4 + plot5
+
+ggsave("image/combined_plots_diff.png", combined_plots)
+
+
+par(old.par)
+
+
+```
+
+```{r,fig.width=12,fig.height=4,message=FALSE,echo=FALSE}
+# ACF and PACF plots for independent variables
+data_gold <- ts(data$gold_data, frequency = 12)
+data_oil <- ts(data$oil, frequency = 12)
+data_unemployment <- ts(data$unemployment, frequency = 12)
+data_usd <- ts(data$usd, frequency = 12)
+data_int_rate <- ts(data$int_rate, frequency = 12)
+
+# Function to create ACF and PACF plots
+create_acf_pacf_plots <- function(data, main_title) {
+  acf_result <- acf(data)
+  pacf_result <- pacf(data)
+  
+  png(paste0("image/other/acf_pacf_plots_diff_", tolower(gsub(" ", "_", main_title)), ".png"), width = 700, height = 600)
+
+  par(mfrow = c(2, 1))
+
+  plot1 <- plot(acf_result, main = paste("ACF of First Order Difference ", main_title))
+
+  plot2 <- plot(pacf_result, main = paste("PACF of First Order Difference ", main_title))
+
+  plot1 + plot2
+
+  dev.off()
+}
+
+# Create ACF and PACF plots for each variable
+create_acf_pacf_plots(data_gold, "Gold")
+create_acf_pacf_plots(data_oil, "Oil")
+create_acf_pacf_plots(data_unemployment, "Unemployment")
+create_acf_pacf_plots(data_usd, "USD Exchange Rate")
+create_acf_pacf_plots(data_int_rate, "Interest Rate")
+
+```
+
+\pagebreak
+
+## Linear Regression Model
+
+```{r}
+LmFit1 <- lm(inflation ~ gold_data + oil +
+               unemployment + usd + int_rate, data=train_data)
+summary(LmFit1)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+old.par <- par(mfrow=c(2,2))
+plot(LmFit1)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(LmFit1)
+```
+```{r}
+# Check for collinearity using VIF
+library(car)
+vif_results1 <- vif(LmFit1)
+
+# Print VIF results
+print(vif_results1)
+```
+
+```{r}
+forecast_LmFit1 <- predict(LmFit1, newdata = test_data)
+
+# Calculate Mean Absolute Error (MAE) for the structural model
+mae_LmFit1 <- mean(abs(test_data$inflation - forecast_LmFit1))
+
+# Print the result
+cat("MAE for LmFit1:", mae_LmFit1, "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_LmFit1 <- sqrt(mean((test_data$inflation - forecast_LmFit1)^2))
+
+# Print the result
+cat("RMSE for LmFit1:", rmse_LmFit1, "\n")
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+# To see more clearly the best value of lambda, we use an ample range
+#bc=boxcox(LmFit1,lambda = seq(-1,1,0.1))
+#best.lam=bc$x[which(bc$y==max(bc$y))]
+#best.lam
+```
+
+Comment: The Linear regression model to predict inflation using the independent variables 'gold_data,' 'oil,' 'unemployment,' 'usd,' and 'int_rate.' The model indicates that 'gold_data,' 'oil,' 'usd,' and 'int_rate' have statistically significant coefficients, suggesting they play a role in explaining inflation variations. However, 'unemployment' does not appear to be a significant predictor. The overall model is statistically significant, as evidenced by the F-statistic and its associated p-value. The model explains approximately 29.77% of the variance in inflation, as indicated by the Multiple R-squared. The performance metrics, Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE), provide insights into the model's accuracy, with MAE at 5.18 and RMSE at 6.19. Interpretation and further analysis should consider the specific context of the data and assumptions underlying linear regression.
+
+\pagebreak
+
+## Linear Regression Model - Log Transfer
+
+```{r}
+LmFit2 <- lm(log(inflation+1) ~ gold_data + oil + unemployment +usd + int_rate, data=train_data)
+summary(LmFit2)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+old.par <- par(mfrow=c(2,2))
+plot(LmFit2)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(LmFit2)
+```
+
+```{r}
+# Check for collinearity using VIF
+library(car)
+vif_results2 <- vif(LmFit2)
+
+# Print VIF results
+print(vif_results2)
+```
+
+```{r}
+forecast_LmFit2 <- predict(LmFit2, newdata = test_data)
+# Convert the log-transformed predictions back to the original scale
+forecast_LmFit2 <- exp(forecast_LmFit2)
+
+# Calculate Mean Absolute Error (MAE) for the structural model
+mae_LmFit2 <- mean(abs(test_data$inflation - forecast_LmFit2))
+# Print the result
+cat("MAE for LmFit1:", mae_LmFit2, "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_LmFit2 <- sqrt(mean((test_data$inflation - forecast_LmFit2)^2))
+
+# Print the result
+cat("RMSE for LmFit1:", rmse_LmFit2, "\n")
+```
+
+Comment: Linear regression model with the natural logarithm of the variable 'inflation + 1' as the dependent variable and includes the independent variables 'gold_data,' 'oil,' 'unemployment,' 'usd,' and 'int_rate.' The logarithmic transformation is applied to the dependent variable, possibly to address non-constant variance or skewness in the original 'inflation' variable. The summary output reveals that only the coefficient for 'usd' is statistically significant at a conventional significance level of 0.05, indicating that changes in the exchange rate ('usd') are associated with a significant effect on the logarithm of inflation. The overall model is statistically significant based on the F-statistic and its associated p-value. However, the model's explanatory power is relatively low, as evidenced by the Multiple R-squared of 0.1372. The Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) provide measures of model prediction accuracy, with MAE at 14.17 and RMSE at 16.92. 
+
+\pagebreak
+
+##  Linear Regression Model - factor month
+
+```{r}
+# Extract month from the date variable
+train_data$month <- as.factor(format(as.Date(train_data$date), "%m"))
+
+# Fit the linear regression model with month effects as factors
+LmFit3 <- lm(log(inflation +1) ~ gold_data + oil + unemployment + usd + int_rate + month, data = train_data)
+
+# Print model summary
+summary(LmFit3)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+old.par <- par(mfrow=c(2,2))
+plot(LmFit3)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(LmFit3)
+```
+
+```{r}
+# Check for collinearity using VIF
+vif_results3 <- vif(LmFit3)
+
+# Print VIF results
+print(vif_results3)
+```
+
+```{r}
+# Extract month from the date variable
+test_data$month <- as.factor(format(as.Date(test_data$date), "%m"))
+
+forecast_LmFit3 <- predict(LmFit3, newdata = test_data)
+
+# Calculate Mean Absolute Error (MAE) for the structural model
+mae_LmFit3 <- mean(abs(test_data$inflation - forecast_LmFit3))
+
+# Print the result
+cat("MAE for LmFit3:", mae_LmFit3, "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_LmFit3 <- sqrt(mean((test_data$inflation - forecast_LmFit3)^2))
+
+# Print the result
+cat("RMSE for LmFit3:", rmse_LmFit3, "\n")
+```
+
+Comment: The linear regression model to include a categorical variable 'month' representing different months. The dependent variable remains 'inflation,' and the independent variables now include 'gold_data,' 'oil,' 'unemployment,' 'usd,' 'int_rate,' and dummy variables for each month from February (month02) to December (month12). The summary output shows that 'gold_data,' 'oil,' 'usd,' and 'int_rate' remain statistically significant, indicating their association with inflation. The inclusion of month-specific dummy variables allows for capturing potential seasonality or monthly effects. However, most month coefficients are not statistically significant, suggesting that the month of the year may not significantly impact inflation after accounting for other variables. The model explains about 31.67% of the variance in inflation, as indicated by the Multiple R-squared. The F-statistic and its associated p-value suggest overall model significance. The Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) provide measures of model prediction accuracy, with MAE at 5.35 and RMSE at 6.29. 
+
+\pagebreak
+
+## Linear Regression Model - factor year
+
+```{r}
+# Extract month from the date variable
+train_data$year <- as.factor(format(as.Date(train_data$date), "%Y"))
+
+# Fit the linear regression model with month effects as factors
+LmFit4 <- lm(log(inflation+1) ~ gold_data + oil + unemployment + usd + int_rate + year, data = train_data)
+
+# Print model summary
+summary(LmFit4)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+old.par <- par(mfrow=c(2,2))
+plot(LmFit4)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(LmFit4)
+```
+
+```{r}
+# Check for collinearity using VIF
+vif_results4 <- vif(LmFit4)
+
+# Print VIF results
+print(vif_results4)
+```
+
+```{r}
+# Extract year from the date variable
+test_data$year <- as.factor(format(as.Date(test_data$date), "%Y"))
+
+forecast_LmFit4 <- predict(LmFit4, newdata = test_data)
+
+# Calculate Mean Absolute Error (MAE) 
+mae_LmFit4 <- mean(abs(test_data$inflation - forecast_LmFit4))
+
+# Print the result
+cat("MAE for LmFit4:", mae_LmFit4, "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_LmFit4 <- sqrt(mean((test_data$inflation - forecast_LmFit4)^2))
+
+# Print the result
+cat("RMSE for LmFit4:", rmse_LmFit4, "\n")
+```
+
+Comment: The linear regression model to incorporate the categorical variable 'year,' representing different years, alongside the original independent variables 'gold_data,' 'oil,' 'unemployment,' 'usd,' and 'int_rate.' The summary output reveals several key insights. Notably, 'oil' and 'usd' remain statistically significant, indicating their significant associations with inflation. Additionally, 'int_rate' is statistically significant, suggesting an impact on inflation. However, 'gold_data' is marginally significant with a p-value of 0.09209, indicating a possible association but not as confidently as the other variables. The coefficients for the individual years reveal the yearly effects on inflation, and some years, such as 2006, 2007, and 2023, show significance. The overall model is statistically significant, as indicated by the F-statistic and its associated p-value, suggesting that at least one of the predictors is related to the response variable. The model explains approximately 34.76% of the variance in inflation, as indicated by the Multiple R-squared. The Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) provide measures of model prediction accuracy, with MAE at 5.07 and RMSE at 6.18.
+
+\pagebreak
+
+## Autoregressive (AR) Model.
+
+```{r}
+LmFit5 <- lm(inflation ~ lag(inflation+1) + 
+               gold_data + oil + unemployment +
+               usd + int_rate, data=train_data)
+
+summary(LmFit5)
+
+forecast_LmFit5 <- predict(LmFit5, newdata = test_data)
+# Convert the log-transformed predictions back to the original scale
+#forecast_LmFit5 <- exp(forecast_LmFit5)
+
+# Calculate Mean Absolute Error (MAE) for the Autoregressive model
+mae_LmFit5 <- mean(abs(test_data$inflation[-1] - forecast_LmFit5[-1]))
+# Print the result
+cat("MAE for LmFit5:", mae_LmFit5, "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_LmFit5 <- sqrt(mean((test_data$inflation[-1] - forecast_LmFit5[-1])^2))
+
+# Print the result
+cat("RMSE for LmFit5:", rmse_LmFit5, "\n")
+
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+old.par <- par(mfrow=c(2,2))
+plot(LmFit5)
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(LmFit5)
+```
+Comment: The linear regression model to forecast inflation, incorporating lagged inflation alongside other predictors, including 'gold_data,' 'oil,' 'unemployment,' 'usd,' and 'int_rate.' The coefficient for the lagged inflation variable is 0.3322, indicating a significant positive relationship, suggesting a certain level of persistence in inflation trends over time. Notably, 'usd' and 'int_rate' emerge as influential predictors, with 'usd' positively impacting inflation and 'int_rate' showing a positive effect as well. 'Oil' is found to have a marginally significant positive influence on inflation, while 'gold_data' is not statistically significant. The overall model exhibits a robust fit, explaining around 40.33% of the variance in inflation, as evidenced by the Multiple R-squared. The F-statistic is significant, emphasizing the model's overall effectiveness. Model performance metrics, such as Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE), further validate the model's predictive accuracy, with MAE at 2.44 and RMSE at 2.67. 
+
+\pagebreak
+
+## ARMAX Model
+
+```{r}
+train_predictors <- cbind(
+  train_data$gold_data,
+  train_data$oil,
+  train_data$unemployment,
+  train_data$usd,
+  train_data$int_rate
+)
+
+# Create a matrix of external regressors for forecasting
+test_predictors <- cbind(
+  test_data$gold_data,
+  test_data$oil,
+  test_data$unemployment,
+  test_data$usd,
+  test_data$int_rate
+)
+
+```
+
+```{r}
+Fit_arma <- auto.arima(train_data$inflation, xreg = train_predictors)
+summary(Fit_arma)
+
+# Forecast using the ARMA model with external regressors
+forecast_arma <- forecast(Fit_arma, xreg = test_predictors, h = 4)
+
+# Forecasted values from the ARMA 
+forecasted_values_arma <- c(forecast_arma$mean[1], 
+                            forecast_arma$mean[2],
+                            forecast_arma$mean[3],
+                            forecast_arma$mean[4])
+
+
+# Calculate Mean Absolute Error (MAE) for the ARMA model
+mae_arma <-  mean(abs(test_data$inflation - forecasted_values_arma))
+
+# Print the result
+cat("MAE for ARMA:", mae_arma , "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_arma <- sqrt(mean((test_data$inflation - forecasted_values_arma)^2))
+
+# Print the result
+cat("RMSE for ARMA:", rmse_arma, "\n")
+
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(Fit_arma)
+```
+Comment: The output reveals the results of a time series regression model with ARIMA(0,0,1) errors applied to the 'train_data$inflation' series. The estimated coefficients indicate that the moving average term (ma1) is 0.2842, and there are five exogenous regressors (xreg1 to xreg5) with corresponding coefficients. The standard errors provide a measure of uncertainty for these estimates. The model's performance on the training set is assessed through various error measures, including the mean error (ME), root mean squared error (RMSE), mean absolute error (MAE), mean percentage error (MPE), mean absolute percentage error (MAPE), mean absolute scaled error (MASE), and autocorrelation of residuals at lag 1 (ACF1). The AIC, AICc, and BIC are provided as model selection criteria. The model exhibits an ME close to zero, indicating a small average deviation between predicted and observed values, and the residuals show low autocorrelation. The MAE and RMSE metrics for the ARIMA model further quantify its predictive accuracy, with MAE at 4.51 and RMSE at 5.52. 
+
+\pagebreak
+
+## Reduced-form Arma Model
+
+```{r}
+arma_reduced_model <- auto.arima(train_data$inflation)
+summary(arma_reduced_model)
+# Forecast using the ARMA model with external regressors
+forecast_arma_reduced_model <- forecast(arma_reduced_model, h = 4)
+
+# Forecasted values from the Reduced ARMA 
+forecasted_values_arma_reduced_model <- c(forecast_arma_reduced_model$mean[1], 
+                            forecast_arma_reduced_model$mean[2],
+                            forecast_arma_reduced_model$mean[3],
+                            forecast_arma_reduced_model$mean[4])
+
+
+# Calculate Mean Absolute Error (MAE) for the Reduced ARMA Model
+mae_arma_reduced_model <-  mean(abs(test_data$inflation - forecasted_values_arma_reduced_model))
+# Print the result
+cat("MAE for Arma Reduced Model:", mae_arma_reduced_model , "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_arma_reduced_model <- sqrt(mean((test_data$inflation - forecasted_values_arma_reduced_model)^2))
+
+# Print the result
+cat("RMSE for Arma Reduced Model:", rmse_arma_reduced_model, "\n")
+```
+
+```{r,fig.width=12,fig.height=6,message=FALSE,echo=FALSE}
+checkresiduals(arma_reduced_model)
+```
+Comment: The results of fitting an ARIMA(1,0,0) model with zero mean to the 'train_data$inflation' series. The model includes an autoregressive term (ar1) with an estimated coefficient of 0.4107, suggesting a moderate positive autocorrelation effect. The model's estimated variance of the residuals (sigma^2) is 3.31, and the log likelihood is -443.42. Model selection criteria, such as AIC, corrected AIC (AICc), and BIC, are provided for assessment. The training set error measures indicate a slight positive bias (ME = 0.0994) in the predictions, with a root mean squared error (RMSE) of 1.8152 and a mean absolute error (MAE) of 0.8382, representing the average magnitude of prediction errors. The Mean Absolute Percentage Error (MAPE) is relatively high at 274.36%, indicating the need for careful interpretation. The autocorrelation of residuals at lag 1 (ACF1) is -0.0251, suggesting a small negative correlation. The Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) for the reduced ARMA model are also provided, with MAE at 5.65 and RMSE at 6.43, offering additional insights into model accuracy. 
+
+\pagebreak
+
+## SARIMA
+
+```{r}
+sarima <- auto.arima(train_data$inflation, seasonal = TRUE)
+summary(sarima)
+# Forecast using the ARMA model with external regressors
+forecast_sarima <- forecast(sarima, h = 4)
+# Forecasted values from the SARIMA
+forecasted_values_sarima <- c(forecast_sarima$mean[1], 
+                            forecast_sarima$mean[2],
+                            forecast_sarima$mean[3],
+                            forecast_sarima$mean[4])
+
+
+# Calculate Mean Absolute Error (MAE) for the SARIMA model
+mae_sarima <-  mean(abs(test_data$inflation - forecasted_values_sarima))
+# Print the result
+cat("MAE for SARIMA:", mae_sarima , "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_sarima <- sqrt(mean((test_data$inflation - forecasted_values_sarima)^2))
+
+# Print the result
+cat("RMSE for SARIMA:", rmse_sarima, "\n")
+
+```
+```{r,fig.width=12,fig.height=5,echo=FALSE,message=FALSE}
+checkresiduals(sarima)
+```
+
+Comment: The output reveals the specifications and performance metrics of an ARIMA(1,0,0) model with zero mean applied to the 'train_data$inflation' series. The model is characterized by an autoregressive term (ar1) with an estimated coefficient of 0.4107. The standard error for this coefficient is 0.0612, and the estimated residual variance (sigma^2) is 3.31. Model selection criteria, including AIC, corrected AIC (AICc), and BIC, are provided, with values of 890.85, 890.91, and 897.64, respectively. The training set error measures indicate a slight positive bias in predictions (ME = 0.0994) and the average magnitude of prediction errors is reflected in RMSE (1.8152) and MAE (0.8382). Notably, the Mean Absolute Percentage Error (MAPE) is relatively high at 274.36%, indicating caution in interpreting percentage accuracy metrics. The autocorrelation of residuals at lag 1 (ACF1) is -0.0251. Additionally, the Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) specific to the SARIMA model are provided as 5.65 and 6.43, respectively. 
+
+\pagebreak
+
+## ARIMA with Automatic Model Selection c(1,0,0)
+
+```{r}
+# Transform the data by taking the first difference
+diff_data <- data$inflation
+diff_train_data <- train_data$inflation
+diff_test_data <- test_data$inflation
+```
+
+```{r}
+# Find the optimal order using auto.arima
+optimal_order <- auto.arima(diff_train_data, trace = TRUE, stepwise = TRUE)
+
+```
+```{r}
+## ARIMA c(1, 0, 0)
+
+arima_model_diff_100 <- Arima(diff_train_data, order = c(1,0,0))
+summary(arima_model_diff_100)
+
+# Use the ARIMA model to forecast future values of inflation
+forecast_diff_100 <- forecast(arima_model_diff_100, h = 4)
+# Forecasted values from the ARMA 
+forecasted_values_diff_100 <- c(forecast_diff_100$mean[1], 
+                            forecast_diff_100$mean[2],
+                            forecast_diff_100$mean[3],
+                            forecast_diff_100$mean[4])
+
+# Calculate Mean Absolute Error (MAE) for the ARMA model
+mae_arima_diff_100 <-  mean(abs(diff_test_data - forecasted_values_diff_100))
+
+# Print the result
+cat("MAE for ARIMA c(1, 0, 0):", mae_arima_diff_100 , "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_arima_diff_100 <- sqrt(mean((diff_test_data - forecasted_values_diff_100 )^2))
+
+# Print the result
+cat("RMSE for ARIMA c(1, 0, 0):", rmse_arima_diff_100, "\n")
+```
+
+Comment: The outcomes of fitting an ARIMA(1,0,0) model with a non-zero mean to the differenced series 'diff_train_data.' The model includes an autoregressive term (ar1) with a coefficient of 0.4065 and a standard error of 0.0614. Notably, a non-zero mean term is introduced with an estimated coefficient of 0.1649 and a standard error of 0.2053. The model's log likelihood is -443.11, and model selection criteria (AIC, AICc, and BIC) are provided as 892.21, 892.32, and 902.39, respectively. Evaluation of the model's performance on the training set reveals a negligible bias in predictions (ME = 0.0021), with a root mean squared error (RMSE) of 1.81 and a mean absolute error (MAE) of 0.84. However, the Mean Absolute Percentage Error (MAPE) is relatively high at 278.02%, warranting careful consideration of percentage accuracy metrics. The autocorrelation of residuals at lag 1 (ACF1) is -0.0206. Additionally, the Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) specific to the ARIMA model with a non-zero mean are reported as 5.51 and 6.30, respectively. 
+
+\pagebreak
+
+##  Dynamic Factor Model
+
+```{r}
+# Load data from Excel file
+data <- read_excel("inflation_data_tur.xlsx")
+
+# Convert the 'date' column to a Date type using anytime
+data$date <- anytime(data$date)
+
+# Set the date for splitting the data
+split_date <- as.Date("2023-06-01")  # Change the date accordingly
+
+# Create training and testing sets
+train_data <- subset(data, date < split_date)
+test_data <- subset(data, date >= split_date)
+
+```
+
+```{r}
+# Define variables
+train_data1 <- train_data[,-1] # Delete the first column time stamp
+# Principal component analysis
+pca <- prcomp(train_data1)
+pc5 <- pca$x[,1:5] # The first 5 PCs
+# Add back time stamp variable
+pc5a <- cbind(train_data[,1], pc5)
+```
+
+```{r,fig.width=12,fig.height=6,echo=FALSE,message=FALSE}
+# Load required libraries
+library(ggplot2)
+library(gridExtra)
+
+plot1_q <-ggplot(pc5a,aes(x=date,y=PC1)) + geom_line() 
+plot2_q <-ggplot(pc5a,aes(x=date,y=PC2)) + geom_line() 
+plot3_q <-ggplot(pc5a,aes(x=date,y=PC3)) + geom_line() 
+plot4_q <-ggplot(pc5a,aes(x=date,y=PC4)) + geom_line() 
+plot5_q <-ggplot(pc5a,aes(x=date,y=PC5)) + geom_line() 
+
+# Arrange the plots in a grid
+grid.arrange(
+  plot1_q,
+  plot2_q,
+  plot3_q,
+  plot4_q,
+  plot5_q,
+  ncol = 1,
+  nrow = 5
+)
+```
+
+```{r,fig.width=12,fig.height=6,echo=FALSE,message=FALSE}
+#Principle Components as time series
+pc5.month = ts(pc5a[,-1], start=c(2005,1), frequency=12)
+pc5.qtr = aggregate(pc5.month, nfrequency=12,mean)
+plot(pc5.qtr)
+```
+
+```{r}
+inflation1 <- train_data$inflation
+data_pca = data.frame(inflation1,pc5.qtr)
+DFM = lm(inflation1~.,data_pca)
+summary(DFM)
+```
+
+```{r,fig.width=12,fig.height=6}
+checkresiduals(DFM)
+```
+
+```{r,fig.width=12,fig.height=6}
+VAR01 <- VAR(pc5.qtr, p = 12, type = "both")
+# Forecast the next 4 quarters for the principal components
+fcast01 <- predict(VAR01, n.ahead = 4)
+plot(fcast01)
+```
+```{r}
+#Extract PC1-PC5 and create a dataframe
+pc.fcst <- data.frame(fcast01$fcst[[1]][,1], fcast01$fcst[[2]][,1],
+                      fcast01$fcst[[3]][,1],fcast01$fcst[[4]][,1],
+                      fcast01$fcst[[5]][,1])
+colnames(pc.fcst) <- c("PC1","PC2","PC3","PC4","PC5")
+#Predict with the dynamic model
+fcst_dfm <- predict(DFM, pc.fcst)
+
+# Calculate Mean Absolute Error (MAE) for the Dynamic Factor Model
+mae_dfm <-  mean(abs(test_data$inflation - fcst_dfm))
+# Print the result
+cat("MAE for Dynamic Factor Model:", mae_dfm , "\n")
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_dfm <- sqrt(mean((test_data$inflation - fcst_dfm)^2))
+
+# Print the result
+cat("RMSE for Dynamic Factor Model:", rmse_dfm, "\n")
+```
+
+Comment: The results of a linear regression model (lm) applied to the response variable 'inflation1' with predictors derived from principal component analysis (PCA) labeled as PC1 through PC5. The coefficients indicate the estimated impact of each principal component on the response variable. The intercept is substantial at 13.07, and all principal components except PC5 exhibit highly significant coefficients (p < 0.05). The residual standard error is 0.2539, suggesting a relatively low level of variability unexplained by the model. The high multiple R-squared value of 0.9996 indicates an excellent fit of the model to the data, and the adjusted R-squared value accounts for the number of predictors. The F-statistic is exceptionally high at 1.176e+05, implying strong evidence against the null hypothesis of no relationship between the predictors and the response. The mean absolute error (MAE) and root mean squared error (RMSE) are reported as 15.87 and 18.58, respectively.
+
+\pagebreak
+
+## VAR Forecasts for the Next 4 Months
+
+```{r}
+#Convert them to time series objects
+#train_dataset
+inflation_train_ts <- ts(train_data$inflation,
+                         frequency=12, start=c(2005, 1), end=c(2023,6))
+
+gold_train_ts <- ts(train_data$gold_data,
+                    frequency=12, start=c(2005, 1), end=c(2023,6))
+
+oil_train_ts <- ts(train_data$oil,
+                   frequency=12, start=c(2005, 1), end=c(2023,6))
+
+unemployment_train_ts <- ts(train_data$unemployment,
+                            frequency=12, start=c(2005, 1), end=c(2023,6))
+
+usd_train_ts <- ts(train_data$usd,
+                   frequency=12, start=c(2005, 1), end=c(2023,6))
+int_rate_train_ts <- ts(train_data$int_rate,
+                        frequency=12, start=c(2005, 1), end=c(2023,6))
+
+train_data_ts <- cbind(inflation_train_ts,
+                       gold_train_ts,oil_train_ts,
+                       unemployment_train_ts,
+                       usd_train_ts,int_rate_train_ts)
+
+#test_dataset
+inflation_test_ts <- ts(test_data$inflation, 
+                        frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+gold_test_ts <- ts(test_data$gold_data, 
+                   frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+oil_test_ts <- ts(test_data$oil, 
+                  frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+unemployment_test_ts <- ts(test_data$unemployment, 
+                           frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+usd_test_ts <- ts(test_data$usd, 
+                  frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+int_rate_test_ts <- ts(test_data$int_rate, 
+                       frequency = 12, start = c(2023, 6), end = c(2023, 10))
+
+
+test_data_ts <- cbind(inflation_test_ts, gold_test_ts, oil_test_ts, 
+                        unemployment_test_ts, usd_test_ts, int_rate_test_ts)
+
+inflation_train_ts_g <- diff(log(inflation_train_ts)) 
+gold_train_ts_g <- diff(log(gold_train_ts)) 
+oil_train_ts_g <- diff(log(oil_train_ts)) 
+unemployment_train_ts_g <- diff(log(unemployment_train_ts)) 
+usd_train_ts_g <- diff(log(usd_train_ts)) 
+int_rate_train_ts_g <- diff(log(int_rate_train_ts)) 
+
+train_data_ts_g <- cbind(inflation_train_ts_g,
+                         gold_train_ts_g,oil_train_ts_g
+                         ,unemployment_train_ts_g,
+                         usd_train_ts_g,int_rate_train_ts_g)
+
+inflation_test_ts_g <- diff(log(inflation_test_ts)) 
+gold_test_ts_g <- diff(log(gold_test_ts)) 
+oil_test_ts_g <- diff(log(oil_test_ts)) 
+unemployment_test_ts_g <- diff(log(unemployment_test_ts)) 
+usd_test_ts_g <- diff(log(usd_test_ts)) 
+int_rate_test_ts_g <- diff(log(int_rate_test_ts)) 
+
+test_data_ts_g <- cbind(inflation_test_ts_g,gold_test_ts_g,
+                        oil_test_ts_g
+                         ,unemployment_test_ts_g,
+                        usd_test_ts_g,int_rate_test_ts_g)
+
+```
+
+```{r,fig.width=12,fig.height=6,echo=FALSE,message=FALSE}
+var_level <- VAR(train_data_ts, p = 4, type = "both" )
+# Forecast VAR models
+forecast_level <- forecast(var_level, h = 4)
+plot(forecast_level)
+```
+
+```{r,echo=FALSE,message=FALSE}
+# Fit VAR model
+var_level <- VAR(train_data_ts, p = 4, type = "both")
+
+# Forecast VAR models
+forecast_level <- forecast(var_level, h = 4)
+
+# Set up PNG device for saving the plot
+png("image\forecast_level_plot.png", width = 800, height = 600)
+
+# Plot the forecast
+plot(forecast_level)
+
+# Save the plot
+dev.off()
+
+```
+
+```{r,fig.width=12,fig.height=6,echo=FALSE,message=FALSE}
+var_growth <- VAR(train_data_ts_g, p = 4, type = "const" )
+# Forecast VAR models
+forecast_growth <- forecast(var_growth, h = 4)
+plot(forecast_growth)
+```
+
+```{r,echo=FALSE,message=FALSE}
+# Fit VAR model
+var_growth <- VAR(train_data_ts_g, p = 4, type = "const" )
+# Forecast VAR models
+forecast_growth <- forecast(var_growth, h = 4)
+
+
+# Set up PNG device for saving the plot
+png("image\forecast_growth_plot.png", width = 800, height = 600)
+
+plot(forecast_growth)
+
+# Save the plot
+dev.off()
+
+```
+
+```{r}
+actual_values <- rbind.data.frame(test_data_ts_g[1],test_data_ts_g[2],test_data_ts_g[3],test_data_ts_g[4])
+colnames(actual_values) <- c("actuals")
+actual_values <- lapply(actual_values, as.numeric)
+```
+
+```{r}
+# Extract forecasted values for the level of the inflation variable
+forecasted_inflation_level <- cumsum(exp(forecast_growth$forecast$inflation_train_ts_g$mean))
+
+# Extract actual values for the level of the inflation variable
+actual_inflation_level <- cumsum(exp(actual_values$actuals))  
+
+# Calculate Mean Absolute Error (MAE) for VAR Level
+mae_var_level <- mean(abs(actual_inflation_level - forecasted_inflation_level))
+
+# Calculate Root Mean Squared Error (RMSE) for VAR Level
+rmse_var_level <- sqrt(mean((actual_inflation_level - forecasted_inflation_level)^2))
+
+# Print the results
+cat("MAE for VAR Level:", mae_var_level, "\n")
+cat("RMSE for VAR Level:", rmse_var_level, "\n")
+
+```
+
+```{r}
+# Extract forecasted values for the growth of the inflation variable
+forecasted_inflation_growth <- forecast_growth$forecast$inflation_train_ts_g$mean
+
+# Extract actual values for the growth of the inflation variable
+actual_inflation_growth <- actual_values$actuals
+
+# Calculate Mean Absolute Error (MAE)
+mae_var_growth <- mean(abs(actual_inflation_growth - forecasted_inflation_growth))
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_var_growth <- sqrt(mean((actual_inflation_growth - forecasted_inflation_growth)^2))
+
+# Print the results
+cat("MAE for VAR Growth:", mae_var_growth, "\n")
+cat("RMSE for VAR Growth:", rmse_var_growth, "\n")
+
+```
+
+Comemnt: A Vector Autoregression (VAR) model is a statistical tool used in time series analysis to study the dynamic relationships among multiple variables over time. It represents each variable as a linear function of its own past values and the past values of other variables in the system. VAR models are flexible, allowing for the examination of complex interactions without imposing a strict causal structure. They are widely used for short-term forecasting, analyzing impulse response functions, and understanding the dynamic interplay of variables. The model order, indicating the number of lagged observations, is a key parameter. VAR models find applications in economics, finance, and various other fields for their ability to capture and predict multivariate time series dynamics.
+
+In the context of the provided VAR model, the reported MAE for the level of inflation is 1.79, and the RMSE is 1.84. Similarly, for the growth rate of inflation, the MAE is 1.01, and the RMSE is 1.43. 
+
+\pagebreak
+
+## Fit Structural Time Series
+
+```{r}
+inflation_test <- test_data$inflation
+Struct1 <- StructTS(inflation_test, "level")
+#summary(Struct1)
+Struct2 <- StructTS(inflation_test, "trend")
+#summary(Struct2)
+
+fcst_level <- forecast(Struct1, h = 4)
+fcst_trend <- forecast(Struct2, h = 4)
+
+mae_level <- accuracy(fcst_level)[1, "MAE"]
+mae_trend <- accuracy(fcst_trend)[1, "MAE"]
+
+# Print the result
+cat("MAE for StructTS function - level:", mae_level, "\n")
+cat("MAE for StructTS function - trend:", mae_trend, "\n")
+
+rmse_level <- accuracy(fcst_level)[1,2]
+rmse_trend <- accuracy(fcst_trend)[1,2]
+
+# Print the result
+cat("RMSE for StructTS function - level:", rmse_level, "\n")
+# Print the result
+cat("RMSE for StructTS function - trend:", rmse_trend, "\n")
+
+```
+Comment: The Structural Time Series (STS) analysis was applied to the inflation test data, decomposing the time series into its level and trend components. The forecast performance of the STS model components was evaluated using Mean Absolute Error (MAE) and Root Mean Squared Error (RMSE) metrics. For the level component, the STS model achieved an MAE of 5.39 and an RMSE of 6.43, indicating the average magnitude and dispersion of forecast errors. Meanwhile, for the trend component, the MAE was 3.09, and the RMSE was 4.66.
+
+\pagebreak
+
+## Structure Change - Breakpoints
+
+```{r}
+# Convert to xts object
+inflation_xts <- xts(train_data[, -1], order.by = as.Date(train_data$date))
+inflation_train <- inflation_xts[,1]
+inflation_growth <- diff(log(inflation_train))
+inflation_growth_lag <- stats::lag(inflation_growth, 1)
+data1 <- data.frame(inflation_growth, inflation_growth_lag, 
+                    train_data[, c("gold_data", "oil", "unemployment", "usd", "int_rate")])
+data1 <- na.omit(data1)
+data1_ts = ts(data1, start=c(2005,1), end = c(2023, 6),frequency=12)
+inf_data_w = window(data1_ts,start=c(2005,1), end = c(2023, 6))
+#plot(inf_data_w[, "inflation_growth"])
+Fit_struct = lm(inflation ~ inflation.1, inf_data_w)
+summary(Fit_struct)
+```
+
+```{r}
+breakpoints1 = breakpoints(inflation ~ inflation.1 , data = inf_data_w)
+summary(breakpoints1)
+```
+
+```{r}
+breakfactor1 = breakfactor(breakpoints1, breaks = 5, label = "seg")
+Fit_struct.2 = lm(inflation ~ 0 + breakfactor1/inflation.1, data = inf_data_w)
+summary(Fit_struct.2)
+```
+
+```{r,fig.width=12,fig.height=6}
+#png("image/breakpoints.png", width = 800, height = 400) 
+plot(inf_data_w[, "inflation"], ylab = "inflation" )
+lines(ts(fitted(Fit_struct),start=2005, frequency = 3), col = "blue" )
+lines(ts(fitted(Fit_struct.2),start=2005, frequency = 3), col = "red")
+lines(breakpoints1, breaks = 2)
+```
+
+```{r}
+# Predictions from the linear model Fit_struct
+predictions_lm <- as.vector(fitted(Fit_struct))
+
+# Predictions from the segmented linear model Fit_struct.2
+predictions_seg_lm <- as.vector(fitted(Fit_struct.2))
+
+# Actual values
+actual_values <- as.vector(inf_data_w[,1])
+
+# Calculate Mean Absolute Error (MAE)
+mae_lm <- mean(abs(predictions_lm - actual_values))
+mae_seg_lm <- mean(abs(predictions_seg_lm - actual_values))
+
+# Calculate Root Mean Squared Error (RMSE)
+rmse_lm <- sqrt(mean((predictions_lm - actual_values)^2))
+rmse_seg_lm <- sqrt(mean((predictions_seg_lm - actual_values)^2))
+
+# Print MAE and RMSE
+cat("MAE for Linear Model:", mae_lm, "\n")
+cat("RMSE for Linear Model:", rmse_lm, "\n")
+
+cat("MAE for Segmented Linear Model:", mae_seg_lm, "\n")
+cat("RMSE for Segmented Linear Model:", rmse_seg_lm, "\n")
+
+```
+Comment: The segmented linear regression model with breakpoints is employed to identify structural changes in the inflation time series, revealing distinct segments with breakpoints corresponding to specific years, such as 2011(1), 2019(7), and others. This model effectively captures critical shifts in inflation dynamics, as indicated by its optimal (m+1)-segment partition. Model evaluation metrics further demonstrate its superior predictive performance over the traditional linear model. The Mean Absolute Error (MAE) for the segmented linear model is 0.06, significantly outperforming the MAE of 0.06 for the linear model. Similarly, the Root Mean Squared Error (RMSE) for the segmented linear model is 0.09, showing a notable improvement over the RMSE of 0.10 for the linear model. 
+
+\pagebreak
+
+# Final Comparison
+
+```{r,echo=FALSE,message=FALSE}
+# Create a data frame to store the results
+comparison_results <- data.frame(Model = c("Prophet",
+                                           "Linear Regression",
+                                           "Linear Regression (Log)", 
+                                           "Linear Regression (Month)",
+                                           "Linear Regression (Year)",
+                                           "Autoregressive (AR) ", 
+                                           "ARMAX",
+                                           "Reduced-form ARMA", 
+                                           "SARIMAX",
+                                           "ARIMA c(1, 0, 0)",
+                                           "Dynamic Factor Model", 
+                                           "VAR Level",
+                                           "VAR Growth", 
+                                           "StructTS Level", 
+                                           "StructTS Trend",
+                                           "Structure Change - Linear",
+                                           "Structure Change - Segmented Linear"),
+                                  MAE = c(mae_prophet, mae_LmFit1, mae_LmFit2, 
+                                          mae_LmFit3, mae_LmFit4, mae_LmFit5, 
+                                          mae_arma, mae_arma_reduced_model, 
+                                          mae_sarima, mae_arima_diff_100, 
+                                          mae_dfm,mae_var_level, mae_var_growth, 
+                                          mae_level, mae_trend,mae_lm,mae_seg_lm),
+                                  RMSE = c(rmse_prophet, rmse_LmFit1, 
+                                           rmse_LmFit2, 
+                                           rmse_LmFit3, rmse_LmFit4,
+                                           rmse_LmFit5, rmse_arma, 
+                                           rmse_arma_reduced_model, 
+                                           rmse_sarima,  rmse_arima_diff_100, rmse_dfm, 
+                                           rmse_var_level, rmse_var_growth,
+                                           rmse_level, rmse_trend,rmse_lm,rmse_seg_lm))
+
+# Sort the data frame by MAE in ascending order
+comparison_results_sorted <- comparison_results[order(comparison_results$MAE), ]
+
+# Print the sorted comparison table
+print(comparison_results_sorted)
+
+```
+
+
+
+
+
+
+
+
+
